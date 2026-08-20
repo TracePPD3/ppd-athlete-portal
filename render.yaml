@@ -5,7 +5,7 @@ services:
   - type: web
     name: ppd-athlete-portal
     runtime: node
-    plan: starter
+    plan: free
     buildCommand: npm install && npm run build
     startCommand: npm start
     envVars:
