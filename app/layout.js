@@ -14,6 +14,7 @@ export const metadata = {
   },
   icons: {
     icon: [
+      { url: "/favicon.png", sizes: "32x32", type: "image/png" },
       { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
       { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
     ],
@@ -35,7 +36,9 @@ export default function RootLayout({ children }) {
         <ServiceWorkerRegister />
         <header className="portal-header">
           <div className="wrap">
-            <div className="badge">PPD</div>
+            <Link href="/" className="badge-logo">
+              <img src="/logo-header.png" alt="Pure Player Development" height={40} />
+            </Link>
             <Link href="/" className="name">
               Athlete Portal
             </Link>
