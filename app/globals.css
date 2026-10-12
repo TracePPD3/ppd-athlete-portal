@@ -160,6 +160,49 @@ label.file.dragover {
 input[type="file"] { display: none; }
 .filename { margin-top: 12px; font-size: 14px; color: var(--silver); word-break: break-all; }
 
+/* ---- Hitting / Pitching toggle, field labels, hints (analyzer page) ---- */
+.field-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--silver);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin: 4px 0 8px;
+}
+.field-label:not(:first-child) { margin-top: 18px; }
+.hint { color: var(--muted); font-size: 14px; margin: -2px 0 10px; }
+
+.sport-toggle {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.sport-btn {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 1;
+  min-height: 46px;
+  padding: 10px 12px;
+  font-size: 15.5px;
+  font-weight: 700;
+  color: var(--muted);
+  background: var(--surface-2);
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.sport-btn:hover { border-color: var(--brand-bright); color: var(--text); }
+.sport-btn.active {
+  color: #fff;
+  background: var(--brand);
+  border-color: var(--brand);
+  box-shadow: 0 2px 10px rgba(107, 33, 168, 0.35);
+}
+.sport-btn:active { background: var(--brand-press); border-color: var(--brand-press); color: #fff; }
+.sport-btn:disabled { opacity: 0.5; cursor: default; }
+
 button.primary {
   -webkit-appearance: none;
   appearance: none;
