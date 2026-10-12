@@ -5,8 +5,8 @@ import Link from "next/link";
 const tools = [
   {
     href: "/swing-analyzer",
-    title: "Swing Analyzer",
-    desc: "Upload a swing clip and get an AI Load / Unload coaching read.",
+    title: "Swing & Pitching Analyzer",
+    desc: "Upload a hitting or pitching clip and get an AI coaching read.",
     status: "active",
   },
   {
