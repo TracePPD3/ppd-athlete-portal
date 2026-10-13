@@ -9,7 +9,9 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "test:clips": "node --env-file=.env.local scripts/run-clips.mjs",
+    "test:clips:dry": "node scripts/run-clips.mjs --dry"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",
