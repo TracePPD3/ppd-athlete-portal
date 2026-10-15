@@ -12,6 +12,9 @@
 // says what each clip should come back as, for example:
 //   { "yelich-good-swing.mov": { "sport": "hitting", "load": "pass", "unload": "pass" } }
 // Pitching clips may also set "angle" ("open side" or "behind").
+// Slow-motion replays set "speed": "slow". They still run, but are reported
+// separately and do not count toward the pass/fail result: only normal-speed
+// clips look like what players actually upload.
 
 import fs from "fs/promises";
 import path from "path";
@@ -87,14 +90,15 @@ async function main() {
 
   console.log(`Sampling: ${SAMPLE_FPS} fps, max ${MAX_FRAMES} frames${dry ? "" : `, model ${MODEL}`}, ${dry ? "dry run" : `${runs} runs per clip`}\n`);
 
-  let mismatches = 0;
+  const results = []; // { file, speed, ok } for clips that have expected verdicts
   for (const file of files) {
     const want = expected[file] || {};
     const sport = want.sport || "hitting";
     const angle = want.angle || "open side";
+    const speed = want.speed === "slow" ? "slow" : "normal";
     const frames = await extractFrames(path.join(clipsDir, file));
     const times = frames.map((f) => f.timeSeconds.toFixed(1)).join(" ");
-    console.log(`${file}  [${sport}, ${angle}]  ${frames.length} frames at: ${times}`);
+    console.log(`${file}  [${sport}, ${angle}${speed === "slow" ? ", SLOW-MOTION" : ""}]  ${frames.length} frames at: ${times}`);
     if (dry) continue;
 
     const got = [];
@@ -119,13 +123,36 @@ async function main() {
         (v) => (!want.load || v.first === want.load) && (!want.unload || v.second === want.unload),
       );
       console.log(`  expected load=${want.load ?? "-"} unload=${want.unload ?? "-"}: ${ok ? "MATCH" : "MISMATCH"}`);
-      if (!ok) mismatches++;
+      results.push({ file, speed, ok });
     }
     console.log("");
   }
 
-  if (!dry) console.log(mismatches === 0 ? "All clips matched." : `${mismatches} clip(s) did not match expected verdicts.`);
-  process.exit(mismatches === 0 ? 0 : 2);
+  if (dry) process.exit(0);
+
+  const normal = results.filter((r) => r.speed === "normal");
+  const slow = results.filter((r) => r.speed === "slow");
+  const summarize = (label, group) => {
+    const failed = group.filter((r) => !r.ok);
+    console.log(`${label}: ${group.length - failed.length} of ${group.length} matched`);
+    for (const r of failed) console.log(`  MISMATCH ${r.file}`);
+    return failed.length;
+  };
+  const normalFailed = summarize("Normal-speed clips (count toward ready to merge)", normal);
+  const slowFailed = summarize("Slow-motion clips (reported only, do not count)", slow);
+  console.log("");
+  if (normal.length === 0) {
+    console.log("No normal-speed clips with expected verdicts: NOT ready to merge.");
+  } else {
+    console.log(normalFailed === 0 ? "All normal-speed clips matched." : "Normal-speed clips did not all match: NOT ready to merge.");
+  }
+  if (slow.length > 0 && slowFailed === 0 && normalFailed > 0) {
+    console.log(
+      "NOTE: slow-motion clips all matched but normal-speed clips did not. The swing is likely" +
+        " getting too few frames at normal speed; find the swing in the video and sample it densely in lib/frames.js.",
+    );
+  }
+  process.exit(normal.length > 0 && normalFailed === 0 ? 0 : 2);
 }
 
 main().catch((err) => {
