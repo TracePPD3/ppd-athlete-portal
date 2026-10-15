@@ -38,13 +38,28 @@ function verdictNear(text) {
   return hit === "✅" || hit === "pass" ? "pass" : "flag";
 }
 
+// Checkpoint headings are lines such as "## 1. LOAD — ✅ Pass" or
+// "**UNLOAD** 🔧". Prefer those heading lines, because the words "load" and
+// "unload" also appear inside the body text ("nothing stored to unload").
+function findVerdict(report, isFirst) {
+  const name = isFirst
+    ? /(?<![A-Za-z])LOAD(?:\s*\/\s*BALANCE)?(?![A-Za-z])/i
+    : /(?<![A-Za-z])(?:UNLOAD|SEPARATION)(?![A-Za-z])/i;
+  const lines = report.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const isHeading = /^\s*(#|\*\*|\d+\.)/.test(line) || /✅|🔧/.test(line);
+    if (!isHeading || !name.test(line)) continue;
+    if (isFirst && /UNLOAD/i.test(line) && !/(?<![A-Za-z])LOAD(?![A-Za-z])/i.test(line.replace(/UNLOAD/gi, ""))) continue;
+    const v = verdictNear(line + " " + (lines[i + 1] || ""));
+    if (v !== "?") return v;
+  }
+  const at = report.search(name);
+  return at >= 0 ? verdictNear(report.slice(at, at + 160)) : "?";
+}
+
 function parseVerdicts(report) {
-  const loadAt = report.search(/(?<![A-Za-z])LOAD(?:\s*\/\s*BALANCE)?(?![A-Za-z])/i);
-  const secondAt = report.search(/(?<![A-Za-z])(?:UNLOAD|SEPARATION)(?![A-Za-z])/i);
-  return {
-    first: loadAt >= 0 ? verdictNear(report.slice(loadAt, loadAt + 160)) : "?",
-    second: secondAt >= 0 ? verdictNear(report.slice(secondAt, secondAt + 160)) : "?",
-  };
+  return { first: findVerdict(report, true), second: findVerdict(report, false) };
 }
 
 async function main() {
