@@ -26,13 +26,24 @@ const dry = args.includes("--dry");
 const runsFlag = args.indexOf("--runs");
 const runs = runsFlag >= 0 ? Number(args[runsFlag + 1]) || 3 : 3;
 
-// "LOAD — Flag" / "UNLOAD — Pass" style headings from the report.
+// The report does not use one fixed heading format: the rubric only asks for a
+// pass (check mark) or a flag (wrench), so a heading may read "LOAD — Pass",
+// "LOAD ✅", or "**Load: Flag 🔧**". Find each checkpoint heading, then read
+// the verdict from the first stretch of text after it.
+function verdictNear(text) {
+  const head = text.slice(0, 160);
+  const mark = head.search(/✅|🔧|\bpass\b|\bflag\b/i);
+  if (mark < 0) return "?";
+  const hit = head.slice(mark).match(/✅|🔧|pass|flag/i)[0].toLowerCase();
+  return hit === "✅" || hit === "pass" ? "pass" : "flag";
+}
+
 function parseVerdicts(report) {
-  const load = report.match(/(?<![A-Za-z])LOAD(?:\/BALANCE)?\s*[—–-]+\s*(Pass|Flag)/i);
-  const unload = report.match(/(?:UNLOAD|SEPARATION)\s*[—–-]+\s*(Pass|Flag)/i);
+  const loadAt = report.search(/(?<![A-Za-z])LOAD(?:\s*\/\s*BALANCE)?(?![A-Za-z])/i);
+  const secondAt = report.search(/(?<![A-Za-z])(?:UNLOAD|SEPARATION)(?![A-Za-z])/i);
   return {
-    first: load ? load[1].toLowerCase() : "?",
-    second: unload ? unload[1].toLowerCase() : "?",
+    first: loadAt >= 0 ? verdictNear(report.slice(loadAt, loadAt + 160)) : "?",
+    second: secondAt >= 0 ? verdictNear(report.slice(secondAt, secondAt + 160)) : "?",
   };
 }
 
@@ -72,10 +83,12 @@ async function main() {
     if (dry) continue;
 
     const got = [];
+    await fs.mkdir(path.join(clipsDir, "reports"), { recursive: true });
     for (let i = 0; i < runs; i++) {
       try {
         const report = await analyzeVideo({ sport, angleSets: [{ angle, frames }] });
         const v = parseVerdicts(report);
+        await fs.writeFile(path.join(clipsDir, "reports", `${file}.run${i + 1}.md`), report);
         got.push(v);
         console.log(`  run ${i + 1}: ${sport === "hitting" ? "Load" : "Load/Balance"} ${v.first}, ${sport === "hitting" ? "Unload" : "Separation"} ${v.second}`);
       } catch (err) {
