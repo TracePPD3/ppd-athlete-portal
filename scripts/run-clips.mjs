@@ -119,11 +119,16 @@ async function main() {
     const stable = got.every((v) => v.first === got[0].first && v.second === got[0].second);
     console.log(`  stable across runs: ${stable ? "yes" : "NO (verdicts changed between runs)"}`);
     if (want.load || want.unload) {
-      const ok = got.every(
-        (v) => (!want.load || v.first === want.load) && (!want.unload || v.second === want.unload),
+      // A run that errored is not a wrong call: track it separately so a crash
+      // isn't mistaken for the rubric or the sampling getting it wrong.
+      const answered = got.filter((v) => v.first !== "error");
+      const wrong = answered.some(
+        (v) => (want.load && v.first !== want.load) || (want.unload && v.second !== want.unload),
       );
-      console.log(`  expected load=${want.load ?? "-"} unload=${want.unload ?? "-"}: ${ok ? "MATCH" : "MISMATCH"}`);
-      results.push({ file, speed, ok });
+      const errored = answered.length < got.length;
+      const status = wrong ? "MISMATCH" : errored ? "ERROR" : "MATCH";
+      console.log(`  expected load=${want.load ?? "-"} unload=${want.unload ?? "-"}: ${status}${status === "ERROR" ? ` (answered runs all correct; ${got.length - answered.length} run(s) errored)` : ""}`);
+      results.push({ file, speed, ok: status === "MATCH", wrong });
     }
     console.log("");
   }
@@ -135,9 +140,10 @@ async function main() {
   const summarize = (label, group) => {
     const failed = group.filter((r) => !r.ok);
     console.log(`${label}: ${group.length - failed.length} of ${group.length} matched`);
-    for (const r of failed) console.log(`  MISMATCH ${r.file}`);
+    for (const r of failed) console.log(`  ${r.wrong ? "MISMATCH" : "ERROR   "} ${r.file}`);
     return failed.length;
   };
+  const normalWrong = normal.some((r) => r.wrong);
   const normalFailed = summarize("Normal-speed clips (count toward ready to merge)", normal);
   const slowFailed = summarize("Slow-motion clips (reported only, do not count)", slow);
   console.log("");
@@ -146,7 +152,7 @@ async function main() {
   } else {
     console.log(normalFailed === 0 ? "All normal-speed clips matched." : "Normal-speed clips did not all match: NOT ready to merge.");
   }
-  if (slow.length > 0 && slowFailed === 0 && normalFailed > 0) {
+  if (slow.length > 0 && slowFailed === 0 && normalWrong) {
     console.log(
       "NOTE: slow-motion clips all matched but normal-speed clips did not. The swing is likely" +
         " getting too few frames at normal speed; find the swing in the video and sample it densely in lib/frames.js.",
