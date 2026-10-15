@@ -3,3 +3,7 @@ node_modules/
 .env
 .env.local
 *.log
+
+# Clip test videos (large); expected.json is tracked
+test-clips/*
+!test-clips/expected.json

@@ -1,0 +1,50 @@
+{
+  "yelich-good-swing.mov": {
+    "sport": "hitting",
+    "angle": "open side",
+    "load": "pass",
+    "unload": "pass"
+  },
+  "IMG_2132.MOV": {
+    "sport": "hitting",
+    "angle": "open side",
+    "load": "flag"
+  },
+  "IMG_1340.MOV": {
+    "sport": "hitting",
+    "angle": "open side",
+    "load": "flag"
+  },
+  "IMG_9484.MOV": {
+    "sport": "hitting",
+    "angle": "open side",
+    "load": "flag"
+  },
+  "good-swing-1.mov": {
+    "sport": "hitting",
+    "angle": "open side",
+    "speed": "slow",
+    "load": "pass",
+    "unload": "pass"
+  },
+  "good-swing-2.mov": {
+    "sport": "hitting",
+    "angle": "open side",
+    "speed": "slow",
+    "load": "pass",
+    "unload": "pass"
+  },
+  "good-swing-3.mov": {
+    "sport": "hitting",
+    "angle": "open side",
+    "speed": "slow",
+    "load": "pass",
+    "unload": "pass"
+  },
+  "good-swing-4.mov": {
+    "sport": "hitting",
+    "angle": "open side",
+    "load": "pass",
+    "unload": "pass"
+  }
+}
