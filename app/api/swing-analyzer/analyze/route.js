@@ -15,7 +15,8 @@ import { NextResponse } from "next/server";
 import { writeFile, rm, mkdtemp } from "fs/promises";
 import os from "os";
 import path from "path";
-import { extractFrames } from "@/lib/frames";
+import { extractFrames, extractThumbnails } from "@/lib/frames";
+import { findContactTime } from "@/lib/swing-finder";
 import { analyzeVideo } from "@/lib/analyze";
 
 // FFmpeg + child_process + fs require the Node.js runtime (not Edge).
@@ -86,14 +87,29 @@ export async function POST(request) {
       const buf = Buffer.from(await clips[i].file.arrayBuffer());
       const videoPath = path.join(uploadDir, `video${i + 1}`);
       await writeFile(videoPath, buf);
-      const frames = await extractFrames(videoPath);
-      angleSets.push({ angle: clips[i].angle, frames });
+      // Hitting: find contact first, then sample the swing densely so foot
+      // plant isn't missed between frames. If contact isn't found, this falls
+      // back to even sampling. Pitching keeps the even sampling it was tuned on.
+      const contactTime =
+        sport === "hitting" ? await findContactTime(await extractThumbnails(videoPath)) : null;
+      if (sport === "hitting") {
+        console.log(`Swing finder: ${contactTime == null ? "no contact found, even sampling" : `contact at ${contactTime.toFixed(2)}s`}`);
+      }
+      const frames = await extractFrames(videoPath, { contactTime });
+      angleSets.push({ angle: clips[i].angle, frames, contactTime });
     }
 
     const report = await analyzeVideo({ sport, angleSets });
     const frameCount = angleSets.reduce((sum, set) => sum + set.frames.length, 0);
 
-    return NextResponse.json({ report, frameCount, clipCount: angleSets.length });
+    // contactTime (hitting only; null = finder fell back to even sampling) is
+    // for checking the swing finder; the page doesn't display it.
+    return NextResponse.json({
+      report,
+      frameCount,
+      clipCount: angleSets.length,
+      contactTime: angleSets[0].contactTime ?? null,
+    });
   } catch (err) {
     console.error("Analysis failed:", err);
     return NextResponse.json(

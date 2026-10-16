@@ -6,6 +6,7 @@
 //   node --env-file=.env.local scripts/run-clips.mjs              # 3 runs per clip
 //   node --env-file=.env.local scripts/run-clips.mjs --runs 5
 //   node scripts/run-clips.mjs --dry                              # frames only, no API call
+//   node --env-file=.env.local scripts/run-clips.mjs --find-only  # swing finder only (cheap)
 //   PPD_SAMPLE_FPS=6 PPD_MAX_FRAMES=24 node --env-file=.env.local scripts/run-clips.mjs
 //
 // Clips live in test-clips/ (videos are git-ignored). test-clips/expected.json
@@ -19,13 +20,28 @@
 import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
-import { extractFrames, SAMPLE_FPS, MAX_FRAMES } from "../lib/frames.js";
+import { extractFrames, extractThumbnails, SAMPLE_FPS, MAX_FRAMES } from "../lib/frames.js";
+
+// US dollars per million tokens (Anthropic list prices), for the cost lines.
+// Output includes the model's thinking tokens.
+const PRICES = {
+  "claude-opus-5": { input: 5, output: 25 },
+  "claude-opus-5-5": { input: 4, output: 20 },
+  "claude-haiku-5-5": { input: 0.1, output: 0.5 },
+};
+
+function dollars(model, usage) {
+  const price = PRICES[model];
+  if (!price) return null;
+  return ((usage.input_tokens || 0) * price.input + (usage.output_tokens || 0) * price.output) / 1e6;
+}
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const clipsDir = path.join(root, "test-clips");
 
 const args = process.argv.slice(2);
 const dry = args.includes("--dry");
+const findOnly = args.includes("--find-only");
 const runsFlag = args.indexOf("--runs");
 const runs = runsFlag >= 0 ? Number(args[runsFlag + 1]) || 3 : 3;
 
@@ -82,13 +98,20 @@ async function main() {
   }
 
   // Imported lazily so --dry works without an API key.
-  const { analyzeVideo, MODEL } = dry ? {} : await import("../lib/analyze.js");
+  const { analyzeVideo, MODEL } = dry || findOnly ? {} : await import("../lib/analyze.js");
+  const { findContactTime, FINDER_MODEL } = dry ? {} : await import("../lib/swing-finder.js");
   if (!dry && !process.env.ANTHROPIC_API_KEY) {
     console.log("ANTHROPIC_API_KEY is not set. Use --env-file=.env.local, or pass --dry.");
     process.exit(1);
   }
 
-  console.log(`Sampling: ${SAMPLE_FPS} fps, max ${MAX_FRAMES} frames${dry ? "" : `, model ${MODEL}`}, ${dry ? "dry run" : `${runs} runs per clip`}\n`);
+  // Each test run saves its reports in its own dated folder, so runs can be
+  // compared before and after a change instead of overwriting each other.
+  const reportsDir = path.join(clipsDir, "reports", new Date().toISOString().replace(/:/g, "-").slice(0, 19));
+  if (!dry && !findOnly) console.log(`Reports: ${path.relative(root, reportsDir)}`);
+
+  const mode = dry ? "dry run (no swing finder, even sampling)" : findOnly ? `swing finder only, model ${FINDER_MODEL}` : `model ${MODEL}, swing finder ${FINDER_MODEL}, ${runs} runs per clip`;
+  console.log(`Sampling: ${SAMPLE_FPS} fps, max ${MAX_FRAMES} frames, ${mode}\n`);
 
   const results = []; // { file, speed, ok } for clips that have expected verdicts
   for (const file of files) {
@@ -96,24 +119,55 @@ async function main() {
     const sport = want.sport || "hitting";
     const angle = want.angle || "open side";
     const speed = want.speed === "slow" ? "slow" : "normal";
-    const frames = await extractFrames(path.join(clipsDir, file));
+    // Same sampling as the live route: hitting finds contact first, then
+    // samples the swing densely (even sampling if contact isn't found).
+    const clipPath = path.join(clipsDir, file);
+    let contactTime = null;
+    let finderCost = 0;
+    if (sport === "hitting" && !dry) {
+      const finderUsage = [];
+      contactTime = await findContactTime(await extractThumbnails(clipPath), {
+        onUsage: (u) => finderUsage.push(u),
+      });
+      finderCost = finderUsage.reduce((s, u) => s + (dollars(FINDER_MODEL, u) ?? 0), 0);
+      const tokens = finderUsage.map((u) => `${u.input_tokens} in, ${u.output_tokens} out`).join("; ");
+      console.log(`${file}  swing finder: ${contactTime == null ? "no contact found, even sampling" : `contact at ${contactTime.toFixed(2)}s`}  (${tokens || "no API call"}, $${finderCost.toFixed(4)})`);
+    }
+    const frames = await extractFrames(clipPath, { contactTime });
     const times = frames.map((f) => f.timeSeconds.toFixed(1)).join(" ");
     console.log(`${file}  [${sport}, ${angle}${speed === "slow" ? ", SLOW-MOTION" : ""}]  ${frames.length} frames at: ${times}`);
-    if (dry) continue;
+    if (dry || findOnly) continue;
 
     const got = [];
-    await fs.mkdir(path.join(clipsDir, "reports"), { recursive: true });
+    const usages = [];
+    await fs.mkdir(reportsDir, { recursive: true });
     for (let i = 0; i < runs; i++) {
       try {
-        const report = await analyzeVideo({ sport, angleSets: [{ angle, frames }] });
+        const report = await analyzeVideo({
+          sport,
+          angleSets: [{ angle, frames }],
+          onUsage: (u) => usages.push(u),
+        });
         const v = parseVerdicts(report);
-        await fs.writeFile(path.join(clipsDir, "reports", `${file}.run${i + 1}.md`), report);
+        await fs.writeFile(path.join(reportsDir, `${file}.run${i + 1}.md`), report);
         got.push(v);
         console.log(`  run ${i + 1}: ${sport === "hitting" ? "Load" : "Load/Balance"} ${v.first}, ${sport === "hitting" ? "Unload" : "Separation"} ${v.second}`);
       } catch (err) {
         got.push({ first: "error", second: "error" });
         console.log(`  run ${i + 1}: ERROR ${err.message}`);
       }
+    }
+
+    // Cost per upload = one swing-finder call + one analysis call.
+    if (usages.length > 0) {
+      const avg = (key) => usages.reduce((s, u) => s + (u[key] || 0), 0) / usages.length;
+      const input = avg("input_tokens");
+      const output = avg("output_tokens");
+      const analysis = dollars(MODEL, { input_tokens: input, output_tokens: output });
+      const cost = analysis == null
+        ? " (no price on file for this model)"
+        : `; per upload about $${(analysis + finderCost).toFixed(3)} (analysis $${analysis.toFixed(3)} + finder $${finderCost.toFixed(4)})`;
+      console.log(`  analysis tokens per run (avg of ${usages.length}): ${Math.round(input)} in, ${Math.round(output)} out${cost}`);
     }
 
     const stable = got.every((v) => v.first === got[0].first && v.second === got[0].second);
@@ -133,7 +187,7 @@ async function main() {
     console.log("");
   }
 
-  if (dry) process.exit(0);
+  if (dry || findOnly) process.exit(0);
 
   const normal = results.filter((r) => r.speed === "normal");
   const slow = results.filter((r) => r.speed === "slow");
