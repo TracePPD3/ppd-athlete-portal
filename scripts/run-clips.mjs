@@ -20,7 +20,7 @@
 import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
-import { extractFrames, extractThumbnails, SAMPLE_FPS, MAX_FRAMES } from "../lib/frames.js";
+import { openClip, SAMPLE_FPS, MAX_FRAMES } from "../lib/frames.js";
 
 // US dollars per million tokens (Anthropic list prices), for the cost lines.
 // Output includes the model's thinking tokens.
@@ -124,16 +124,22 @@ async function main() {
     const clipPath = path.join(clipsDir, file);
     let contactTime = null;
     let finderCost = 0;
-    if (sport === "hitting" && !dry) {
-      const finderUsage = [];
-      contactTime = await findContactTime(await extractThumbnails(clipPath), {
-        onUsage: (u) => finderUsage.push(u),
-      });
-      finderCost = finderUsage.reduce((s, u) => s + (dollars(FINDER_MODEL, u) ?? 0), 0);
-      const tokens = finderUsage.map((u) => `${u.input_tokens} in, ${u.output_tokens} out`).join("; ");
-      console.log(`${file}  swing finder: ${contactTime == null ? "no contact found, even sampling" : `contact at ${contactTime.toFixed(2)}s`}  (${tokens || "no API call"}, $${finderCost.toFixed(4)})`);
+    const clip = await openClip(clipPath, { thumbnails: sport === "hitting" && !dry });
+    let frames;
+    try {
+      if (sport === "hitting" && !dry) {
+        const finderUsage = [];
+        contactTime = await findContactTime(clip.thumbnails, {
+          onUsage: (u) => finderUsage.push(u),
+        });
+        finderCost = finderUsage.reduce((s, u) => s + (dollars(FINDER_MODEL, u) ?? 0), 0);
+        const tokens = finderUsage.map((u) => `${u.input_tokens} in, ${u.output_tokens} out`).join("; ");
+        console.log(`${file}  swing finder: ${contactTime == null ? "no contact found, even sampling" : `contact at ${contactTime.toFixed(2)}s`}  (${tokens || "no API call"}, $${finderCost.toFixed(4)})`);
+      }
+      frames = await clip.frames({ contactTime });
+    } finally {
+      await clip.close();
     }
-    const frames = await extractFrames(clipPath, { contactTime });
     const times = frames.map((f) => f.timeSeconds.toFixed(1)).join(" ");
     console.log(`${file}  [${sport}, ${angle}${speed === "slow" ? ", SLOW-MOTION" : ""}]  ${frames.length} frames at: ${times}`);
     if (dry || findOnly) continue;

@@ -15,7 +15,7 @@ import { NextResponse } from "next/server";
 import { writeFile, rm, mkdtemp } from "fs/promises";
 import os from "os";
 import path from "path";
-import { extractFrames, extractThumbnails } from "@/lib/frames";
+import { openClip } from "@/lib/frames";
 import { findContactTime } from "@/lib/swing-finder";
 import { analyzeVideo } from "@/lib/analyze";
 
@@ -82,7 +82,7 @@ export async function POST(request) {
 
     // Seconds spent in each step, summed across clips, to see where upload
     // time goes on the server. Logged and returned; the page doesn't show it.
-    const timings = { saveUpload: 0, thumbnails: 0, finder: 0, frames: 0, analysis: 0 };
+    const timings = { saveUpload: 0, decode: 0, finder: 0, frames: 0, analysis: 0 };
     const startedAt = performance.now();
     let stepStart = startedAt;
     const endStep = (name) => {
@@ -102,17 +102,23 @@ export async function POST(request) {
       // Hitting: find contact first, then sample the swing densely so foot
       // plant isn't missed between frames. If contact isn't found, this falls
       // back to even sampling. Pitching keeps the even sampling it was tuned on.
-      let contactTime = null;
-      if (sport === "hitting") {
-        const thumbs = await extractThumbnails(videoPath);
-        endStep("thumbnails");
-        contactTime = await findContactTime(thumbs);
-        endStep("finder");
-        console.log(`Swing finder: ${contactTime == null ? "no contact found, even sampling" : `contact at ${contactTime.toFixed(2)}s`}`);
+      // One decode makes the overview frames and the finder's thumbnails
+      // ("decode" timing); "frames" is the dense swing window plus selection.
+      const clip = await openClip(videoPath, { thumbnails: sport === "hitting" });
+      try {
+        endStep("decode");
+        let contactTime = null;
+        if (sport === "hitting") {
+          contactTime = await findContactTime(clip.thumbnails);
+          endStep("finder");
+          console.log(`Swing finder: ${contactTime == null ? "no contact found, even sampling" : `contact at ${contactTime.toFixed(2)}s`}`);
+        }
+        const frames = await clip.frames({ contactTime });
+        endStep("frames");
+        angleSets.push({ angle: clips[i].angle, frames, contactTime });
+      } finally {
+        await clip.close();
       }
-      const frames = await extractFrames(videoPath, { contactTime });
-      endStep("frames");
-      angleSets.push({ angle: clips[i].angle, frames, contactTime });
     }
 
     const report = await analyzeVideo({ sport, angleSets });
