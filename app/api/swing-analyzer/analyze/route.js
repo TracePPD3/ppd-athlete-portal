@@ -80,6 +80,17 @@ export async function POST(request) {
       }
     }
 
+    // Seconds spent in each step, summed across clips, to see where upload
+    // time goes on the server. Logged and returned; the page doesn't show it.
+    const timings = { saveUpload: 0, thumbnails: 0, finder: 0, frames: 0, analysis: 0 };
+    const startedAt = performance.now();
+    let stepStart = startedAt;
+    const endStep = (name) => {
+      const now = performance.now();
+      timings[name] += (now - stepStart) / 1000;
+      stepStart = now;
+    };
+
     // Write each upload to a temp file so FFmpeg can read it by path.
     uploadDir = await mkdtemp(path.join(os.tmpdir(), "ppd-upload-"));
     const angleSets = [];
@@ -87,20 +98,29 @@ export async function POST(request) {
       const buf = Buffer.from(await clips[i].file.arrayBuffer());
       const videoPath = path.join(uploadDir, `video${i + 1}`);
       await writeFile(videoPath, buf);
+      endStep("saveUpload");
       // Hitting: find contact first, then sample the swing densely so foot
       // plant isn't missed between frames. If contact isn't found, this falls
       // back to even sampling. Pitching keeps the even sampling it was tuned on.
-      const contactTime =
-        sport === "hitting" ? await findContactTime(await extractThumbnails(videoPath)) : null;
+      let contactTime = null;
       if (sport === "hitting") {
+        const thumbs = await extractThumbnails(videoPath);
+        endStep("thumbnails");
+        contactTime = await findContactTime(thumbs);
+        endStep("finder");
         console.log(`Swing finder: ${contactTime == null ? "no contact found, even sampling" : `contact at ${contactTime.toFixed(2)}s`}`);
       }
       const frames = await extractFrames(videoPath, { contactTime });
+      endStep("frames");
       angleSets.push({ angle: clips[i].angle, frames, contactTime });
     }
 
     const report = await analyzeVideo({ sport, angleSets });
+    endStep("analysis");
     const frameCount = angleSets.reduce((sum, set) => sum + set.frames.length, 0);
+    for (const name of Object.keys(timings)) timings[name] = Number(timings[name].toFixed(1));
+    timings.total = Number(((performance.now() - startedAt) / 1000).toFixed(1));
+    console.log(`Analyze timings (s): ${JSON.stringify(timings)}`);
 
     // contactTime (hitting only; null = finder fell back to even sampling) is
     // for checking the swing finder; the page doesn't display it.
@@ -109,6 +129,7 @@ export async function POST(request) {
       frameCount,
       clipCount: angleSets.length,
       contactTime: angleSets[0].contactTime ?? null,
+      timings,
     });
   } catch (err) {
     console.error("Analysis failed:", err);
