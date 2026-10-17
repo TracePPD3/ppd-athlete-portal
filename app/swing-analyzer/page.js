@@ -8,14 +8,23 @@ const MODES = {
   hitting: {
     sub: "Upload a swing clip (open-side view) and get a Load / Unload read.",
     button: "Analyze Swing",
-    loading: "Extracting frames and analyzing the swing…",
+    loading: "Analyzing your swing. This usually takes 1 to 3 minutes. Please keep this page open.",
   },
   pitching: {
     sub: "Upload a delivery (open side or behind, or both) and get a Load/Balance and Separation read.",
     button: "Analyze Pitching",
-    loading: "Extracting frames and analyzing the delivery…",
+    loading: "Analyzing your pitch. This usually takes 1 to 3 minutes. Please keep this page open.",
   },
 };
+
+// Shown instead of the mode's loading message once an analysis passes this
+// many seconds, so a long wait doesn't look frozen.
+const SLOW_AFTER_SECONDS = 120;
+const SLOW_MESSAGE = "Still working. Longer videos can take up to 3 minutes. Please keep this page open.";
+
+function formatElapsed(seconds) {
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
 
 const ANGLE_NAMES = { open: "open side", behind: "behind" };
 
@@ -72,8 +81,18 @@ export default function AnalyzerPage() {
   const [file1, setFile1] = useState(null);
   const [file2, setFile2] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [elapsed, setElapsed] = useState(0); // seconds since Analyze was pressed
   const [error, setError] = useState("");
   const [report, setReport] = useState("");
+
+  // Running timer while an analysis is in progress.
+  useEffect(() => {
+    if (!loading) return;
+    setElapsed(0);
+    const started = Date.now();
+    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, [loading]);
 
   const mode = MODES[sport];
   const otherAngle = angle === "open" ? "behind" : "open";
@@ -231,7 +250,8 @@ export default function AnalyzerPage() {
         {loading && (
           <div className="status">
             <span className="spinner" />
-            {mode.loading}
+            {elapsed >= SLOW_AFTER_SECONDS ? SLOW_MESSAGE : mode.loading}{" "}
+            <span className="elapsed">{formatElapsed(elapsed)}</span>
           </div>
         )}
         {error && !loading && <div className="status error">{error}</div>}
