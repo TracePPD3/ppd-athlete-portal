@@ -227,6 +227,7 @@ button.primary:disabled { opacity: 0.45; box-shadow: none; cursor: default; }
 
 .status { margin-top: 16px; color: var(--muted); font-size: 15px; }
 .status.error { color: var(--danger); }
+.status .elapsed { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .spinner {
   display: inline-block;
   width: 16px; height: 16px;
